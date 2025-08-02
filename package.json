@@ -1,0 +1,43 @@
+{
+  "name": "quiz-game",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha tests/quiz-game.ts --require ts-node/register --timeout 60000 --grep 'Quiz Game Tests'",
+    "test-all": "mocha tests/*.ts --require ts-node/register --timeout 60000",
+    "test-basic": "mocha tests/basic-test.ts --require ts-node/register --timeout 60000",
+    "test-simple": "mocha tests/simple-test.ts --require ts-node/register --timeout 30000",
+    "test-counter": "ts-mocha tests-counter/rust-counter.ts --timeout 60000",
+    "production": "cross-env NODE_OPTIONS=--no-deprecation ts-node --transpile-only tests/quiz-game-production.ts",
+    "build": "anchor build",
+    "deploy": "anchor deploy"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@magicblock-labs/ephemeral-rollups-sdk": "0.2.5",
+    "@solana/buffer-layout": "^4.0.1",
+    "@solana/web3.js": "^1.98.2",
+    "borsh": "0.7.0",
+    "dotenv": "^16.5.0",
+    "fs": "0.0.2"
+  },
+  "packageManager": "pnpm@10.11.0",
+  "devDependencies": {
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "^1.98.4",
+    "@types/node": "^24.1.0",
+    "@types/chai": "^5.2.2",
+    "@types/mocha": "^10.0.10",
+    "bn.js": "^5.2.2",
+    "borsh": "^2.0.0",
+    "cross-env": "^10.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2",
+    "mocha": "^11.2.2",
+    "prettier": "^3.5.3",
+    "ts-mocha": "^11.1.0"
+  }
+}
