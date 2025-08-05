@@ -189,12 +189,16 @@ export class AddQuestionArgs {
   serialize(): Buffer {
     try {
       const instrBuffer = Buffer.from(this.instruction);
+
+      // Create a structured object for serialization
       const questionData = {
         question_index: this.question_index,
         question_text: this.question_text,
         options: this.options,
         correct_answer_index: this.correct_answer_index,
       };
+
+      // Serialize using the schema
       const dataBuffer = Buffer.from(
         borsh.serialize(AddQuestionArgs.dataSchema, questionData)
       );

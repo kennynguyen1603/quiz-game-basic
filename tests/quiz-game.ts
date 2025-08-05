@@ -1,11 +1,8 @@
 import * as web3 from "@solana/web3.js";
-import * as borsh from "borsh";
 import * as fs from "fs";
 import { Suite } from "mocha";
 import {
-  QuizQuestion,
   QuizSession,
-  PlayerAnswer,
   PlayerScore,
   InitializeQuizArgs,
   AddQuestionArgs,
