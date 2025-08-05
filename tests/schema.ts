@@ -2,12 +2,12 @@ import * as borsh from "borsh";
 
 export class QuizQuestion {
   question_text: string;
-  options: string[];
+  options: [string, string, string, string];
   correct_answer_index: number;
 
   constructor(props: {
     question_text: string;
-    options: string[];
+    options: [string, string, string, string];
     correct_answer_index: number;
   }) {
     this.question_text = props.question_text;
@@ -60,8 +60,8 @@ export class QuizSession {
           ["host", [32]],
           ["question_count", "u8"],
           ["player_count", "u8"],
-          ["active", "bool"],
-          ["completed", "bool"],
+          ["active", "u8"], // Rust bool serializes as u8
+          ["completed", "u8"], // Rust bool serializes as u8
         ],
       },
     ],
@@ -70,7 +70,15 @@ export class QuizSession {
   static deserialize(data: Buffer): QuizSession {
     try {
       const result = borsh.deserialize(QuizSession.schema, QuizSession, data);
-      return result as QuizSession;
+      // Convert u8 boolean values back to boolean
+      const session = result as any;
+      return new QuizSession({
+        host: session.host,
+        question_count: session.question_count,
+        player_count: session.player_count,
+        active: Boolean(session.active),
+        completed: Boolean(session.completed),
+      });
     } catch (error) {
       console.error("Failed to deserialize QuizSession:", error);
       throw error;
@@ -145,6 +153,40 @@ export class PlayerScore {
 }
 
 // Instruction argument classes
+export class AddQuestionData {
+  question_index: number;
+  question_text: string;
+  options: [string, string, string, string];
+  correct_answer_index: number;
+
+  constructor(props: {
+    question_index: number;
+    question_text: string;
+    options: [string, string, string, string];
+    correct_answer_index: number;
+  }) {
+    this.question_index = props.question_index;
+    this.question_text = props.question_text;
+    this.options = props.options;
+    this.correct_answer_index = props.correct_answer_index;
+  }
+
+  static schema = new Map([
+    [
+      AddQuestionData,
+      {
+        kind: "struct",
+        fields: [
+          ["question_index", "u8"],
+          ["question_text", "string"],
+          ["options", ["string", 4]],
+          ["correct_answer_index", "u8"],
+        ],
+      },
+    ],
+  ]);
+}
+
 export class InitializeQuizArgs {
   instruction: Uint8Array;
   question_count: number;
@@ -170,13 +212,13 @@ export class AddQuestionArgs {
   instruction: Uint8Array;
   question_index: number;
   question_text: string;
-  options: string[];
+  options: [string, string, string, string];
   correct_answer_index: number;
 
   constructor(props: {
     question_index: number;
     question_text: string;
-    options: string[];
+    options: [string, string, string, string];
     correct_answer_index: number;
   }) {
     this.instruction = new Uint8Array([1, 0, 0, 0, 0, 0, 0, 0]); // 8-byte discriminator
@@ -190,17 +232,17 @@ export class AddQuestionArgs {
     try {
       const instrBuffer = Buffer.from(this.instruction);
 
-      // Create a structured object for serialization
-      const questionData = {
+      // Create AddQuestionData object for serialization
+      const questionData = new AddQuestionData({
         question_index: this.question_index,
         question_text: this.question_text,
         options: this.options,
         correct_answer_index: this.correct_answer_index,
-      };
+      });
 
-      // Serialize using the schema
+      // Serialize using the AddQuestionData schema
       const dataBuffer = Buffer.from(
-        borsh.serialize(AddQuestionArgs.dataSchema, questionData)
+        borsh.serialize(AddQuestionData.schema, questionData)
       );
       return Buffer.concat([instrBuffer, dataBuffer]);
     } catch (error) {
@@ -208,21 +250,6 @@ export class AddQuestionArgs {
       throw error;
     }
   }
-
-  static dataSchema = new Map([
-    [
-      Object,
-      {
-        kind: "struct",
-        fields: [
-          ["question_index", "u8"],
-          ["question_text", "string"],
-          ["options", ["string", 4]],
-          ["correct_answer_index", "u8"],
-        ],
-      },
-    ],
-  ]);
 }
 
 export class StartQuizArgs {
@@ -271,7 +298,7 @@ export class SubmitAnswersArgs {
   serialize(): Buffer {
     try {
       const instrBuffer = Buffer.from(this.instruction);
-      // Direct Vec<u8> serialization: length (4 bytes) + data
+      // Borsh Vec<u8> serialization: length (4 bytes little-endian) + data
       const lengthBuffer = Buffer.alloc(4);
       lengthBuffer.writeUInt32LE(this.answers.length, 0);
       const answersBuffer = Buffer.from(this.answers);
