@@ -68,10 +68,49 @@ describe("Quiz Game Tests:", function (this: Suite) {
   let player2ScorePda: web3.PublicKey;
 
   before(async function () {
-    // Create user keypairs - reuse one keypair to avoid rate limiting
-    hostKeypair = await initializeKeypair(connectionBaseLayer);
-    player1Keypair = web3.Keypair.generate(); // Use same as host but different keypair
-    player2Keypair = web3.Keypair.generate(); // Use same as host but different keypair
+    // Get the funded keypair for transferring funds
+    const fundedKeypair = await initializeKeypair(connectionBaseLayer);
+
+    // Create fresh keypairs for each test run to avoid account conflicts
+    hostKeypair = web3.Keypair.generate();
+    player1Keypair = web3.Keypair.generate();
+    player2Keypair = web3.Keypair.generate();
+
+    // Transfer SOL from funded keypair to test keypairs
+    const transferAmount = 0.1 * web3.LAMPORTS_PER_SOL; // Increase to 0.1 SOL each
+
+    const transferTxHost = new web3.Transaction().add(
+      web3.SystemProgram.transfer({
+        fromPubkey: fundedKeypair.publicKey,
+        toPubkey: hostKeypair.publicKey,
+        lamports: transferAmount,
+      })
+    );
+    await web3.sendAndConfirmTransaction(connectionBaseLayer, transferTxHost, [
+      fundedKeypair,
+    ]);
+
+    const transferTx1 = new web3.Transaction().add(
+      web3.SystemProgram.transfer({
+        fromPubkey: fundedKeypair.publicKey,
+        toPubkey: player1Keypair.publicKey,
+        lamports: transferAmount,
+      })
+    );
+    await web3.sendAndConfirmTransaction(connectionBaseLayer, transferTx1, [
+      fundedKeypair,
+    ]);
+
+    const transferTx2 = new web3.Transaction().add(
+      web3.SystemProgram.transfer({
+        fromPubkey: fundedKeypair.publicKey,
+        toPubkey: player2Keypair.publicKey,
+        lamports: transferAmount,
+      })
+    );
+    await web3.sendAndConfirmTransaction(connectionBaseLayer, transferTx2, [
+      fundedKeypair,
+    ]);
 
     // Get PDAs
     [quizSessionPda] = web3.PublicKey.findProgramAddressSync(
@@ -143,6 +182,16 @@ describe("Quiz Game Tests:", function (this: Suite) {
   it("Initialize quiz session on Solana", async function () {
     const start = Date.now();
 
+    // Check host balance before proceeding
+    const hostBalance = await connectionBaseLayer.getBalance(
+      hostKeypair.publicKey
+    );
+    console.log(`Host balance: ${hostBalance / web3.LAMPORTS_PER_SOL} SOL`);
+
+    if (hostBalance < 0.01 * web3.LAMPORTS_PER_SOL) {
+      throw new Error("Host account has insufficient balance");
+    }
+
     const tx = new web3.Transaction();
     const keys = [
       // Host
@@ -183,17 +232,71 @@ describe("Quiz Game Tests:", function (this: Suite) {
       tx,
       [hostKeypair],
       {
-        skipPreflight: true,
+        skipPreflight: false, // Enable preflight to get better error messages
         commitment: "confirmed",
       }
     );
 
     const duration = Date.now() - start;
     console.log(`${duration}ms (Base Layer) Initialize Quiz txHash: ${txHash}`);
+
+    // Wait for account to be finalized and retry
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Verify the account was created
+    let quizAccountInfo = await connectionBaseLayer.getAccountInfo(
+      quizSessionPda,
+      "confirmed"
+    );
+    let retries = 0;
+    while (!quizAccountInfo && retries < 5) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      quizAccountInfo = await connectionBaseLayer.getAccountInfo(
+        quizSessionPda,
+        "confirmed"
+      );
+      retries++;
+    }
+
+    console.log("Quiz account created:", !!quizAccountInfo);
+    if (quizAccountInfo) {
+      console.log("Quiz account data length:", quizAccountInfo.data.length);
+      console.log("Quiz account owner:", quizAccountInfo.owner.toString());
+    }
   });
 
   it("Add first question on Solana", async function () {
     const start = Date.now();
+
+    // Check quiz session account first
+    const quizAccountInfo = await connectionBaseLayer.getAccountInfo(
+      quizSessionPda,
+      "confirmed"
+    );
+    console.log("Quiz account data length:", quizAccountInfo?.data.length);
+
+    if (!quizAccountInfo) {
+      throw new Error("Quiz session account not found. Initialize quiz first.");
+    }
+
+    try {
+      const quizSession = QuizSession.deserialize(
+        Buffer.from(quizAccountInfo.data)
+      );
+      console.log("Quiz session active:", quizSession.active);
+      console.log("Quiz session completed:", quizSession.completed);
+      console.log(
+        "Quiz session host:",
+        Buffer.from(quizSession.host).toString("hex")
+      );
+      console.log(
+        "Expected host:",
+        hostKeypair.publicKey.toBuffer().toString("hex")
+      );
+    } catch (e) {
+      console.log("Failed to deserialize quiz session:", e);
+      throw e;
+    }
 
     const tx = new web3.Transaction();
     const keys = [
@@ -226,7 +329,12 @@ describe("Quiz Game Tests:", function (this: Suite) {
     const addQuestionArgs = new AddQuestionArgs({
       question_index: 0,
       question_text: "What is the capital of France?",
-      options: ["London", "Berlin", "Paris", "Madrid"],
+      options: ["London", "Berlin", "Paris", "Madrid"] as [
+        string,
+        string,
+        string,
+        string,
+      ],
       correct_answer_index: 2,
     });
 
@@ -245,7 +353,7 @@ describe("Quiz Game Tests:", function (this: Suite) {
       tx,
       [hostKeypair],
       {
-        skipPreflight: true,
+        skipPreflight: false,
         commitment: "confirmed",
       }
     );
@@ -288,7 +396,7 @@ describe("Quiz Game Tests:", function (this: Suite) {
     const addQuestionArgs = new AddQuestionArgs({
       question_index: 1,
       question_text: "What is 2 + 2?",
-      options: ["3", "4", "5", "6"],
+      options: ["3", "4", "5", "6"] as [string, string, string, string],
       correct_answer_index: 1,
     });
 
@@ -307,7 +415,7 @@ describe("Quiz Game Tests:", function (this: Suite) {
       tx,
       [hostKeypair],
       {
-        skipPreflight: true,
+        skipPreflight: false,
         commitment: "confirmed",
       }
     );
@@ -318,6 +426,29 @@ describe("Quiz Game Tests:", function (this: Suite) {
 
   it("Start quiz on Solana", async function () {
     const start = Date.now();
+
+    // Check if questions were added first with confirmed commitment
+    const question1AccountInfo = await connectionBaseLayer.getAccountInfo(
+      question1Pda,
+      "confirmed"
+    );
+    const question2AccountInfo = await connectionBaseLayer.getAccountInfo(
+      question2Pda,
+      "confirmed"
+    );
+
+    if (!question1AccountInfo || !question2AccountInfo) {
+      // Wait a bit and retry
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const question1AccountInfoRetry =
+        await connectionBaseLayer.getAccountInfo(question1Pda, "confirmed");
+      const question2AccountInfoRetry =
+        await connectionBaseLayer.getAccountInfo(question2Pda, "confirmed");
+
+      if (!question1AccountInfoRetry || !question2AccountInfoRetry) {
+        throw new Error("Questions must be added before starting quiz");
+      }
+    }
 
     const tx = new web3.Transaction();
     const keys = [
@@ -351,7 +482,7 @@ describe("Quiz Game Tests:", function (this: Suite) {
       tx,
       [hostKeypair],
       {
-        skipPreflight: true,
+        skipPreflight: false,
         commitment: "confirmed",
       }
     );
@@ -383,9 +514,9 @@ describe("Quiz Game Tests:", function (this: Suite) {
         isSigner: false,
         isWritable: true,
       },
-      // Ephemeral Rollups Program
+      // Owner Program (Quiz Program)
       {
-        pubkey: DELEGATION_PROGRAM_ID,
+        pubkey: PROGRAM_ID,
         isSigner: false,
         isWritable: false,
       },
@@ -407,6 +538,12 @@ describe("Quiz Game Tests:", function (this: Suite) {
       // Delegation Metadata
       {
         pubkey: delegationMetadataPdaFromDelegatedAccount(player1AnswerPda),
+        isSigner: false,
+        isWritable: false,
+      },
+      // Delegation Program
+      {
+        pubkey: DELEGATION_PROGRAM_ID,
         isSigner: false,
         isWritable: false,
       },
@@ -468,15 +605,9 @@ describe("Quiz Game Tests:", function (this: Suite) {
         isSigner: false,
         isWritable: true,
       },
-      // Owner Program
+      // Owner Program (Quiz Program)
       {
         pubkey: PROGRAM_ID,
-        isSigner: false,
-        isWritable: false,
-      },
-      // Ephemeral Rollups Program
-      {
-        pubkey: DELEGATION_PROGRAM_ID,
         isSigner: false,
         isWritable: false,
       },
@@ -498,6 +629,12 @@ describe("Quiz Game Tests:", function (this: Suite) {
       // Delegation Metadata
       {
         pubkey: delegationMetadataPdaFromDelegatedAccount(player2AnswerPda),
+        isSigner: false,
+        isWritable: false,
+      },
+      // Delegation Program
+      {
+        pubkey: DELEGATION_PROGRAM_ID,
         isSigner: false,
         isWritable: false,
       },
